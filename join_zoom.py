@@ -387,12 +387,17 @@ def ensure_muted_video_off(page, attempts: int = 3) -> tuple[bool, bool]:
     time.sleep(2)  # let the in-meeting toolbar settle after join
     # wait until the footer toolbar is reachable (mic or video button visible)
     for _ in range(6):
-        if _mic_state(page) != "unknown" or _video_state(page) != "unknown":
+        ms0, vs0 = _mic_state(page), _video_state(page)
+        if os.environ.get("ZOOM_DEBUG"):
+            print(f"  [ensure] reach: mic={ms0} video={vs0}")
+        if ms0 != "unknown" or vs0 != "unknown":
             break
         _reveal_toolbar(page)
         time.sleep(1)
     for _ in range(attempts):
         ms = _mic_state(page)
+        if os.environ.get("ZOOM_DEBUG"):
+            print(f"  [ensure] attempt: mic={ms} video={_video_state(page)}")
         if ms == "unmuted":
             try:
                 page.locator("button[aria-label='mute my microphone']").first.click(timeout=8000)
@@ -433,6 +438,14 @@ def detect_in_meeting(page) -> str:
     try:
         leave = page.locator("button[aria-label='Leave'], button[aria-label='離開'], button:has-text('Leave')")
         if leave.count() and leave.first.is_visible():
+            return "in_meeting"
+    except Exception:
+        pass
+    # the camera self-view dialog ("Do you see yourself?") only appears inside
+    # a live meeting — treat it as in_meeting
+    try:
+        if page.locator("button:has-text('No, Try Another Camera')").count() or \
+           page.locator("button:has-text('换一个摄像头')").count():
             return "in_meeting"
     except Exception:
         pass
@@ -548,6 +561,7 @@ def join_one(m: dict, args) -> int:
 
             # 5. wait for in-meeting / waiting room / error
             state = "other"
+            join_retried = False
             t0 = time.time()
             while time.time() - t0 < 150:
                 time.sleep(4)
@@ -556,6 +570,10 @@ def join_one(m: dict, args) -> int:
                     break
                 if state in ("invalid", "ended", "auth"):
                     break
+                # still "other": the join click may have raced — retry it once
+                if time.time() - t0 > 40 and not join_retried:
+                    click_join_button(page)
+                    join_retried = True
             print(f"  post-join state: {state}")
 
             if state in ("invalid",):
@@ -569,6 +587,10 @@ def join_one(m: dict, args) -> int:
             if state == "ended":
                 print("WARN: meeting already ended — nothing to attend")
                 return 0
+            if state == "other":
+                page.screenshot(path=os.path.join(evidence, f"{slug}_unknown.png"))
+                print("ERROR: could not confirm joining the meeting (unexpected page state)")
+                return 1
 
             handle_post_join_dialogs(page)
 
