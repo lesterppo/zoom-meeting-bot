@@ -1,0 +1,19 @@
+name: probe-chrome
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for system Chrome
+        run: |
+          echo "== which =="
+          which google-chrome google-chrome-stable chromium chromium-browser 2>&1 || true
+          echo "== ls =="
+          ls -la /usr/bin/google-chrome* /opt/google/chrome/chrome 2>&1 || true
+          echo "== version =="
+          google-chrome --version 2>&1 || google-chrome-stable --version 2>&1 || true
+          echo "== xvfb =="
+          which xvfb-run || true
