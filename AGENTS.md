@@ -15,6 +15,12 @@ Actions cron (`*/5`) gates the join via `check_due.py` so no-op ticks cost
 - **`join_zoom.py` must stay a single file** — it is the whole bot. Keep
   new selectors/flows inside it with fallbacks for both English and
   zh-TW/zh-CN UI labels.
+- **`preflight.py` is HTTPS-only and stdlib-only.** It classifies a meeting
+  by whether Zoom issues a `wpk` web-participant key in the join redirect —
+  the only reliable server-side existence signal (the SPA shell embeds every
+  i18n string, so text sniffing is useless). Never add browser/playwright
+  deps to it; its job is to skip the ~2min Chromium install for dead
+  meetings. Ambiguous results must return `error` so the bot still tries.
 - **Zoom web-client UI is a moving target.** Before changing selectors,
   re-verify live against `https://zoom.us/test` (Join → "Join from browser"
   → `#input-for-name` → `.preview-join-button`). The Join button has a race

@@ -17,6 +17,10 @@ joined from a web browser (no desktop client needed).
 GitHub Actions cron (*/5)  ──►  check_due.py (stdlib, ~5s no-op)
                                    │  due? (join window hit or manual dispatch)
                                    ▼
+                    preflight.py (HTTPS only, ~1s, no browser)
+                                   │  meeting exists? (wpk issued)
+                     invalid/ended ─┴─►  skip: no install, report, exit green
+                                   ▼
                         install Playwright + Chromium
                                    ▼
                     xvfb-run join_zoom.py  (headed browser)
@@ -41,6 +45,19 @@ to skip the flaky interstitial), the `#input-for-name` form, the
 enabled-transition race on the Join button (fixed with a JS click), the
 "Do you see yourself?" camera check, fake-device audio, and
 waiting-room/meeting-ended states.
+
+### HTTPS pre-flight (saves ~2 min on dead meetings)
+
+Before installing the browser, the workflow runs `preflight.py` — a pure
+HTTPS GET against Zoom's join endpoint (~1s). Zoom issues a `wpk` web
+participant key **only for meetings that exist**, so the check is reliable
+and needs no browser:
+
+- `ok` → meeting exists → proceed to install + join
+- `invalid` → bad ID / cancelled meeting → skip install, finish green
+- `ended` → meeting already over → skip join, finish green
+- `error`/ambiguous → unknown (SPA shell, geo, bot-block) → **proceed anyway**
+  so a false-negative never costs attendance
 
 ### Mute + camera off (attendee privacy)
 
@@ -152,6 +169,7 @@ workflow does this automatically).
 
 ```
 join_zoom.py                 main bot (join → stay → leave)
+preflight.py                 HTTPS-only meeting existence check (wpk signal)
 check_due.py                 stdlib due-checker for the cron gate
 meetings.example.yaml        config template (meetings.yaml is gitignored)
 .github/workflows/zoom-attendance.yml   schedule + manual dispatch
