@@ -397,7 +397,13 @@ def ensure_muted_video_off(page, attempts: int = 3) -> tuple[bool, bool]:
     for _ in range(attempts):
         ms = _mic_state(page)
         if os.environ.get("ZOOM_DEBUG"):
-            print(f"  [ensure] attempt: mic={ms} video={_video_state(page)}")
+            vs_now = _video_state(page)
+            print(f"  [ensure] attempt: mic={ms} video={vs_now}")
+            try:
+                all_btns = page.evaluate("""() => Array.from(document.querySelectorAll('button')).filter(bn=>{const r=bn.getBoundingClientRect();return r.width>0}).map(bn=>({t:(bn.innerText||'').trim().slice(0,20),a:bn.getAttribute('aria-label')})).filter(x=>x.a && /microphone|audio|video|camera/i.test(x.a))""")
+                print(f"  [ensure] audio/video btns: {json.dumps(all_btns)}")
+            except Exception:
+                pass
         if ms == "unmuted":
             try:
                 page.locator("button[aria-label='mute my microphone']").first.click(timeout=8000)

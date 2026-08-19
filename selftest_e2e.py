@@ -15,13 +15,24 @@ def fresh_url():
     with sync_playwright() as p:
         b = p.chromium.launch(headless=False, args=["--no-sandbox"])
         pg = b.new_page()
-        pg.goto("https://zoom.us/test", timeout=60000, wait_until="domcontentloaded")
-        time.sleep(5)
-        pg.locator("a.submit.join.user").first.click()
-        pg.wait_for_selector("text=Join from browser", timeout=20000)
-        pg.get_by_text("Join from browser", exact=True).first.click()
-        time.sleep(6)
-        m = re.search(r"zoom\.us/j/(\d+)\?pwd=([A-Za-z0-9._-]+)", pg.url)
+        m = None
+        for attempt in range(4):
+            pg.goto("https://zoom.us/test", timeout=60000, wait_until="domcontentloaded")
+            time.sleep(5)
+            try:
+                pg.locator("a.submit.join.user").first.click()
+            except Exception:
+                time.sleep(3)
+            try:
+                pg.wait_for_selector("text=Join from browser", timeout=15000)
+                pg.get_by_text("Join from browser", exact=True).first.click()
+            except Exception:
+                pass
+            time.sleep(6)
+            m = re.search(r"zoom\.us/j/(\d+)\?pwd=([A-Za-z0-9._-]+)", pg.url)
+            if m:
+                break
+            print(f"  fresh_url attempt {attempt + 1} failed, retrying")
         b.close()
         if not m:
             raise RuntimeError("could not obtain fresh test meeting URL")
