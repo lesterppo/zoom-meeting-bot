@@ -21,11 +21,14 @@ GitHub Actions cron (*/5)  ──►  check_due.py (stdlib, ~5s no-op)
                                    ▼
                     xvfb-run join_zoom.py  (headed browser)
                                    │
-        zoom.us/j/<id>?pwd=... ──► "Join from browser" ──► #input-for-name
+        app.zoom.us/wc/join/<id>?pwd=...  ──►  #input-for-name
                                    │
+                       mute + stop video (preview)
                        JS-click .preview-join-button
                                    │
-              in-meeting detected (button[aria-label=Leave])
+              in-meeting detected (Leave button / camera dialog)
+                                   │
+              enforce mute + camera-off (verified via aria state)
                                    │
               stay until end · heartbeat · screenshots every 15 min
                                    ▼
@@ -33,9 +36,23 @@ GitHub Actions cron (*/5)  ──►  check_due.py (stdlib, ~5s no-op)
 ```
 
 The web-client flow is **live-verified** against Zoom's current UI (2026-08):
-interstitial handling, the `#input-for-name` form, the enabled-transition race
-on the Join button (fixed with a JS click), the "Do you see yourself?" camera
-check, fake-device audio, and waiting-room/meeting-ended states.
+URL normalization (`zoom.us/j/<id>?pwd=...` → `app.zoom.us/wc/join/<id>?pwd=...`
+to skip the flaky interstitial), the `#input-for-name` form, the
+enabled-transition race on the Join button (fixed with a JS click), the
+"Do you see yourself?" camera check, fake-device audio, and
+waiting-room/meeting-ended states.
+
+### Mute + camera off (attendee privacy)
+
+The bot joins **silent with video off**, enforced in two layers:
+
+1. **Preview form** — clicks `Mute` and `Stop Video` before joining.
+2. **In-meeting enforcement** — Zoom *resets* the preview controls on join,
+   so after entering the meeting the bot reads the mic/video button state
+   (`aria-label="mute my microphone"` = unmuted, `aria-label="stop my video"`
+   = video on) and clicks until both are off. The final state is verified and
+   logged (`in-meeting state: muted=True video_off=True`) before the JOINED
+   screenshot is taken.
 
 ## Quick start
 
