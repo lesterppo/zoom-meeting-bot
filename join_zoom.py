@@ -650,7 +650,9 @@ def main() -> int:
         except Exception as e:
             print(f"ERROR: bad --meeting-json/--meeting-file: {e}")
             return 1
-        m.setdefault("_tz", ZoneInfo(DEFAULT_TZ))
+        # _tz may arrive as an IANA string (check_due.py writes tz.key) — coerce
+        tzname = m.get("_tz") or DEFAULT_TZ
+        m["_tz"] = ZoneInfo(tzname) if isinstance(tzname, str) else tzname
         m["_start"] = datetime.now(m["_tz"])  # already due by construction
         if args.duration:
             m["duration_min"] = int(args.duration)
