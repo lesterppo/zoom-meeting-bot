@@ -385,6 +385,12 @@ def ensure_muted_video_off(page, attempts: int = 3) -> tuple[bool, bool]:
     muted = False
     video_off = False
     time.sleep(2)  # let the in-meeting toolbar settle after join
+    # wait until the footer toolbar is reachable (mic or video button visible)
+    for _ in range(6):
+        if _mic_state(page) != "unknown" or _video_state(page) != "unknown":
+            break
+        _reveal_toolbar(page)
+        time.sleep(1)
     for _ in range(attempts):
         ms = _mic_state(page)
         if ms == "unmuted":
