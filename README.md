@@ -21,14 +21,15 @@ GitHub Actions cron (*/5)  ──►  check_due.py (stdlib, ~5s no-op)
                                    │  meeting exists? (wpk issued)
                      invalid/ended ─┴─►  skip: no install, report, exit green
                                    ▼
-                        install Playwright + Chromium
+                pip install playwright (~15s) — NO browser download:
+                GitHub runners ship Google Chrome, launched via channel="chrome"
                                    ▼
-                    xvfb-run join_zoom.py  (headed browser)
+                    xvfb-run join_zoom.py  (headed system Chrome)
                                    │
-        app.zoom.us/wc/join/<id>?pwd=...  ──►  #input-for-name
+        app.zoom.us/wc/join/<id>?pwd=...  ──►  name form (SPA or legacy)
                                    │
                        mute + stop video (preview)
-                       JS-click .preview-join-button
+                       JS-click join (SPA .preview-join-button / legacy .submit)
                                    │
               in-meeting detected (Leave button / camera dialog)
                                    │
@@ -41,10 +42,20 @@ GitHub Actions cron (*/5)  ──►  check_due.py (stdlib, ~5s no-op)
 
 The web-client flow is **live-verified** against Zoom's current UI (2026-08):
 URL normalization (`zoom.us/j/<id>?pwd=...` → `app.zoom.us/wc/join/<id>?pwd=...`
-to skip the flaky interstitial), the `#input-for-name` form, the
+to skip the flaky interstitial), both join-form variants (SPA `#input-for-name`
+and the legacy `#inputname` served to some CDN clients), the
 enabled-transition race on the Join button (fixed with a JS click), the
 "Do you see yourself?" camera check, fake-device audio, and
 waiting-room/meeting-ended states.
+
+### No browser download on GitHub Actions
+
+`ubuntu-latest` runners ship **Google Chrome pre-installed**, so the workflow
+doesn't run `playwright install chromium` (~2 min, 400 MB+ download) at all.
+It installs only the small `playwright` pip wheel (~15 s) and launches the
+system Chrome via `channel="chrome"`. A fallback step still installs
+Playwright's bundled Chromium if system Chrome is ever absent (e.g. macOS
+runners, future image changes).
 
 ### HTTPS pre-flight (saves ~2 min on dead meetings)
 
