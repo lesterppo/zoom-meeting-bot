@@ -252,15 +252,25 @@ def _click_text_any(page, texts, timeout=8000) -> bool:
             continue
     return False
 
-def wait_for_name_form(page, timeout_s=120) -> bool:
-    """Wait for either the join form (#input-for-name) or an interstitial to click through."""
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
+def _has_name_form(page) -> bool:
+    """True if either Zoom join-form variant is visible:
+      SPA:   #input-for-name
+      legacy: #inputname (system-Chrome/CDN variant)"""
+    for sel in ("#input-for-name", "#inputname"):
         try:
-            if page.locator("#input-for-name").count() and page.locator("#input-for-name").first.is_visible():
+            if page.locator(sel).count() and page.locator(sel).first.is_visible():
                 return True
         except Exception:
             pass
+    return False
+
+
+def wait_for_name_form(page, timeout_s=120) -> bool:
+    """Wait for either the join form or an interstitial to click through."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if _has_name_form(page):
+            return True
         body = _visible_texts(page)
         # interstitial / PWA "Join from browser" modal
         if any(t in body for t in TXT_JOIN_BROWSER):
@@ -290,26 +300,28 @@ def enter_passcode(page, m: dict):
             continue
 
 def click_join_button(page) -> bool:
-    """Click the Join button. Use JS click: Playwright click can race the enabled
+    """Click the Join button. SPA uses .preview-join-button; the legacy
+    variant uses .submit. Use JS click: Playwright click can race the enabled
     transition on .preview-join-button (button shows as enabled but click no-ops)."""
-    sel = ".preview-join-button"
-    try:
-        page.wait_for_selector(sel, state="visible", timeout=60000)
-    except PWTimeout:
-        return False
-    try:
-        page.evaluate("""(sel) => {
-            const b = document.querySelector(sel);
-            if (b) { b.click(); return true; }
-            return false;
-        }""", sel)
-        return True
-    except Exception:
+    for sel in (".preview-join-button", "#unlogin-join-form .submit, .unlogin-join-form .submit, form#unlogin-join-form button.submit"):
         try:
-            page.locator(sel).first.click(timeout=5000)
+            page.wait_for_selector(sel, state="visible", timeout=15000)
+        except PWTimeout:
+            continue
+        try:
+            page.evaluate("""(sel) => {
+                const b = document.querySelector(sel);
+                if (b) { b.click(); return true; }
+                return false;
+            }""", sel)
             return True
         except Exception:
-            return False
+            try:
+                page.locator(sel).first.click(timeout=5000)
+                return True
+            except Exception:
+                continue
+    return False
 
 
 def mute_and_stop_video_preview(page) -> tuple[bool, bool]:
@@ -526,7 +538,15 @@ def join_one(m: dict, args) -> int:
     slug = re.sub(r"[^A-Za-z0-9]+", "_", str(m.get("name", "meeting"))).strip("_") or "meeting"
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=args.headless, args=LAUNCH_ARGS)
+        launch_kwargs = {"headless": args.headless, "args": LAUNCH_ARGS}
+        if args.use_system_chrome:
+            # GitHub-hosted runners ship Google Chrome pre-installed; using it
+            # avoids the ~2min `playwright install chromium` download entirely.
+            launch_kwargs["channel"] = "chrome"
+            print("  browser: system Google Chrome (channel=chrome)")
+        else:
+            print("  browser: Playwright-bundled Chromium")
+        browser = p.chromium.launch(**launch_kwargs)
         ctx = browser.new_context(viewport={"width": 1280, "height": 900})
         page = ctx.new_page()
         try:
@@ -549,11 +569,12 @@ def join_one(m: dict, args) -> int:
 
             # 3. passcode if prompted
             enter_passcode(page, m)
-            if not (page.locator("#input-for-name").count() and page.locator("#input-for-name").first.is_visible()):
+            if not _has_name_form(page):
                 time.sleep(2)
 
-            # 4. name + mute/video-off + join
-            name_input = page.locator("#input-for-name").first
+            # 4. name + mute/video-off + join (SPA or legacy form variant)
+            name_sel = "#input-for-name" if page.locator("#input-for-name").count() else "#inputname"
+            name_input = page.locator(name_sel).first
             name_input.wait_for(state="visible", timeout=30000)
             name_input.fill(display)
             time.sleep(1)
@@ -565,19 +586,29 @@ def join_one(m: dict, args) -> int:
                 return 1
             print("  join button clicked")
 
-            # 5. wait for in-meeting / waiting room / error
+            # 5. wait for in-meeting / waiting room / error (self-healing:
+            #    the legacy form can submit into the SPA form — refill & rejoin)
             state = "other"
             join_retried = False
             t0 = time.time()
             while time.time() - t0 < 150:
                 time.sleep(4)
                 state = detect_in_meeting(page)
+                if os.environ.get("ZOOM_DEBUG"):
+                    body = _visible_texts(page)[:80].replace("\n", " ")
+                    print(f"  [wait] t={int(time.time()-t0)}s state={state} url={page.url[:55]} body={body!r}")
                 if state in ("in_meeting", "waiting"):
                     break
                 if state in ("invalid", "ended", "auth"):
                     break
-                # still "other": the join click may have raced — retry it once
-                if time.time() - t0 > 40 and not join_retried:
+                # still "other": the join click may have raced or the legacy
+                # form handed off to the SPA form — refill & rejoin. Wait 70s
+                # first: system Chrome can take ~45s to connect the meeting.
+                if time.time() - t0 > 70 and not join_retried:
+                    if _has_name_form(page):
+                        name_sel = "#input-for-name" if page.locator("#input-for-name").count() else "#inputname"
+                        page.locator(name_sel).first.fill(display)
+                        time.sleep(0.5)
                     click_join_button(page)
                     join_retried = True
             print(f"  post-join state: {state}")
@@ -667,6 +698,8 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="print plan without launching browser")
     ap.add_argument("--validate", action="store_true", help="validate config and print plan")
     ap.add_argument("--headless", action="store_true", help="headless browser (default: headed, for Xvfb)")
+    ap.add_argument("--use-system-chrome", action="store_true",
+                    help="launch pre-installed Google Chrome (channel=chrome) instead of Playwright's bundled Chromium — avoids the browser download; use on GitHub runners")
     ap.add_argument("--evidence-dir", help="where to write screenshots (default: ./evidence)")
     args = ap.parse_args()
 

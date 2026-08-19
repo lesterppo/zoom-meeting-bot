@@ -93,8 +93,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install Chromium (Playwright)
+      - name: Detect browser (system Chrome preferred — no download)
         if: steps.check.outputs.due == '1' && steps.preflight.outputs.state != 'invalid'
+        id: browser
+        run: |
+          if command -v google-chrome >/dev/null 2>&1 || command -v google-chrome-stable >/dev/null 2>&1; then
+            echo "mode=system-chrome" >> "$GITHUB_OUTPUT"
+            echo "Using pre-installed Google Chrome — no browser download needed."
+          else
+            echo "mode=playwright-chromium" >> "$GITHUB_OUTPUT"
+            echo "No system Chrome — falling back to Playwright-bundled Chromium."
+          fi
+
+      - name: Install Playwright Chromium (fallback, no system Chrome)
+        if: steps.check.outputs.due == '1' && steps.preflight.outputs.state != 'invalid' && steps.browser.outputs.mode == 'playwright-chromium'
         run: python -m playwright install --with-deps chromium
 
       - name: Join meeting
@@ -103,10 +115,12 @@ jobs:
           MEETING_FILE: /tmp/due_meeting.json
           DURATION: ${{ inputs.duration }}
           DISPLAY_NAME: ${{ inputs.display_name }}
+          BROWSER_MODE: ${{ steps.browser.outputs.mode }}
         run: |
           ARGS=""
           if [ -n "$DURATION" ]; then ARGS="$ARGS --duration $DURATION"; fi
           if [ -n "$DISPLAY_NAME" ]; then ARGS="$ARGS --display-name $DISPLAY_NAME"; fi
+          if [ "$BROWSER_MODE" = "system-chrome" ]; then ARGS="$ARGS --use-system-chrome"; fi
           xvfb-run -a python3 join_zoom.py --meeting-file "$MEETING_FILE" $ARGS
 
       - name: Upload evidence

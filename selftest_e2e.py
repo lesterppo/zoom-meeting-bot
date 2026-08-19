@@ -46,6 +46,8 @@ def main():
     import json
     cmd = [sys.executable, "join_zoom.py", "--meeting-json", json.dumps(meeting),
            "--evidence-dir", "evidence"]
+    if "--use-system-chrome" in sys.argv:
+        cmd.append("--use-system-chrome")
     r = subprocess.run(cmd, capture_output=True, text=True)
     print(r.stdout)
     if r.stderr:
