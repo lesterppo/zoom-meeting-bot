@@ -337,36 +337,88 @@ def mute_and_stop_video_preview(page) -> tuple[bool, bool]:
     return muted, video_off
 
 
-def ensure_muted_video_off(page) -> tuple[bool, bool]:
-    """After joining, verify the attendee is muted and video is off; enforce if not.
-    Zoom in-meeting buttons:
-      mic:  aria 'mute my microphone'   = currently UNMUTED (click to mute)
-            aria 'unmute my microphone' = currently MUTED
-      cam:  aria 'start my video'       = currently OFF (click to start)
-            aria 'stop my video'        = currently ON (click to stop)
-    Returns (muted, video_off)."""
+def _mic_state(page) -> str:
+    """'muted' | 'unmuted' | 'unknown'. Zoom in-meeting:
+      aria 'mute my microphone'   = currently UNMUTED (click to mute)
+      aria 'unmute my microphone' = currently MUTED"""
+    try:
+        if page.locator("button[aria-label='unmute my microphone']").count() and \
+           page.locator("button[aria-label='unmute my microphone']").first.is_visible():
+            return "muted"
+        if page.locator("button[aria-label='mute my microphone']").count() and \
+           page.locator("button[aria-label='mute my microphone']").first.is_visible():
+            return "unmuted"
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _video_state(page) -> str:
+    """'on' | 'off' | 'unknown'. Zoom in-meeting:
+      aria 'stop my video' = currently ON (click to stop)
+      aria 'start my video' = currently OFF"""
+    try:
+        if page.locator("button[aria-label='start my video']").count() and \
+           page.locator("button[aria-label='start my video']").first.is_visible():
+            return "off"
+        if page.locator("button[aria-label='stop my video']").count() and \
+           page.locator("button[aria-label='stop my video']").first.is_visible():
+            return "on"
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _reveal_toolbar(page):
+    """Zoom's footer toolbar auto-hides; wiggle the mouse to reveal it."""
+    try:
+        page.mouse.move(640, 870)
+        time.sleep(0.8)
+    except Exception:
+        pass
+
+
+def ensure_muted_video_off(page, attempts: int = 3) -> tuple[bool, bool]:
+    """Enforce mute + video-off after joining. Zoom resets the preview controls
+    on join, so this is the step that actually guarantees a silent attendee
+    with camera off. Returns (muted, video_off)."""
     muted = False
     video_off = False
-    try:
-        loc = page.locator("button[aria-label='mute my microphone']")
-        if loc.count() and loc.first.is_visible():
-            loc.first.click(timeout=5000)
+    time.sleep(2)  # let the in-meeting toolbar settle after join
+    for _ in range(attempts):
+        ms = _mic_state(page)
+        if ms == "unmuted":
+            try:
+                page.locator("button[aria-label='mute my microphone']").first.click(timeout=8000)
+                time.sleep(1)
+            except Exception:
+                pass
+        elif ms == "muted":
             muted = True
-            time.sleep(0.5)
-        elif page.locator("button[aria-label='unmute my microphone']").count():
-            muted = True  # already muted
-    except Exception:
-        pass
-    try:
-        loc = page.locator("button[aria-label='stop my video']")
-        if loc.count() and loc.first.is_visible():
-            loc.first.click(timeout=5000)
+        else:
+            _reveal_toolbar(page)
+
+        vs = _video_state(page)
+        if vs == "on":
+            try:
+                page.locator("button[aria-label='stop my video']").first.click(timeout=8000)
+                time.sleep(1)
+            except Exception:
+                pass
+        elif vs == "off":
             video_off = True
-            time.sleep(0.5)
-        elif page.locator("button[aria-label='start my video']").count():
-            video_off = True  # already off
-    except Exception:
-        pass
+        else:
+            _reveal_toolbar(page)
+
+        if muted and video_off:
+            break
+        time.sleep(1)
+
+    # final verification pass
+    if not muted:
+        muted = _mic_state(page) == "muted"
+    if not video_off:
+        video_off = _video_state(page) == "off"
     return muted, video_off
 
 def detect_in_meeting(page) -> str:
