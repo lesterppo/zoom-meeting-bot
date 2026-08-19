@@ -88,17 +88,17 @@ jobs:
           exit 0
 
       - name: Install Python deps
-        if: steps.check.outputs.due == '1' && steps.preflight.outputs.state == 'ok'
+        if: steps.check.outputs.due == '1' && steps.preflight.outputs.state != 'invalid'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Install Chromium (Playwright)
-        if: steps.check.outputs.due == '1' && steps.preflight.outputs.state == 'ok'
+        if: steps.check.outputs.due == '1' && steps.preflight.outputs.state != 'invalid'
         run: python -m playwright install --with-deps chromium
 
       - name: Join meeting
-        if: steps.check.outputs.due == '1' && steps.preflight.outputs.state == 'ok'
+        if: steps.check.outputs.due == '1' && steps.preflight.outputs.state != 'invalid'
         env:
           MEETING_FILE: /tmp/due_meeting.json
           DURATION: ${{ inputs.duration }}

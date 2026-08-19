@@ -24,6 +24,7 @@ import argparse
 import json
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -51,6 +52,32 @@ def build_join_url(m: dict) -> str:
 
 
 def preflight(m: dict) -> str:
+    """Best-effort existence check. Zoom serves request-variant responses
+    (A/B/CDN), so we retry ambiguous results up to 3x. The workflow is
+    fail-open: only a CONFIRMED invalid skips the install; ambiguous/ok
+    both proceed, so a real meeting is never blocked — join_zoom.py is the
+    source of truth for joinability."""
+    states = []
+    for attempt in range(3):
+        try:
+            s = _preflight_once(m)
+        except Exception as e:
+            print(f"  preflight attempt {attempt + 1} error: {e}")
+            s = "error"
+        states.append(s)
+        if s in ("ok", "invalid"):
+            return s  # confident signal — don't wait
+        time.sleep(1)
+    # all ambiguous → pick the most common non-error state, else error
+    from collections import Counter
+    c = Counter(states)
+    for s, n in c.most_common():
+        if s != "error":
+            return s
+    return "error"
+
+
+def _preflight_once(m: dict) -> str:
     url = build_join_url(m)
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/html,*/*"})
     try:
@@ -59,7 +86,6 @@ def preflight(m: dict) -> str:
             html = resp.read(200_000).decode("utf-8", errors="ignore")
             status = resp.status
     except urllib.error.HTTPError as e:
-        # Zoom can 403/404 bot-looking requests; treat as unknown, let bot try
         print(f"  preflight HTTP {e.code} for {url.split('?')[0]} — treating as unknown")
         return "error"
     except Exception as e:
@@ -70,17 +96,23 @@ def preflight(m: dict) -> str:
     title = title_m.group(1).strip() if title_m else ""
     low = html.lower()
 
-    # 1. Zoom issues a wpk (web participant key) only for meetings that exist.
-    #    This is the ONLY reliable server-side signal: the SPA shell contains
-    #    every i18n string ("has ended", "sign in"...) in its JS bundle, so
-    #    text sniffing cannot distinguish states — only wpk issuance can.
+    # 1. Invalid-meeting signal. The string "meeting link is invalid" appears
+    #    in the shared JS bundle of EVERY page, so it alone is useless.
+    #    Reliable invalid markers (server-rendered, absent from valid pages):
+    #      - <title>Error - Zoom</title>
+    #      - "(3,001)" error code
+    #    Note: Zoom issues a wpk token even for invalid meetings when a pwd
+    #    param is present, so error markers must be checked FIRST.
+    if "error - zoom" in title.lower() or "(3,001)" in low:
+        return "invalid"
+
+    # 2. Zoom issues a wpk (web participant key) in the redirect for meetings
+    #    that exist. This is the reliable existence signal: the SPA shell
+    #    embeds every i18n string in its JS bundle, so text sniffing cannot
+    #    distinguish states — only wpk issuance can.
     if "wpk=" in final_url or "wpk=" in url:
         print(f"  preflight OK ({status}) wpk issued for {url.split('?')[0]}")
         return "ok"
-
-    # 2. explicit invalid-meeting marker (server-rendered error page)
-    if "error - zoom" in low or "(3,001)" in low or "meeting link is invalid" in low:
-        return "invalid"
 
     # 3. no wpk but no error either — ambiguous (SPA shell, geo, bot-block, …)
     print(f"  preflight ambiguous: title={title!r} size={len(html)} — treating as unknown")
