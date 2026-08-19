@@ -48,14 +48,16 @@ enabled-transition race on the Join button (fixed with a JS click), the
 "Do you see yourself?" camera check, fake-device audio, and
 waiting-room/meeting-ended states.
 
-### No browser download on GitHub Actions
+### Browser strategy (reliable + fast)
 
-`ubuntu-latest` runners ship **Google Chrome pre-installed**, so the workflow
-doesn't run `playwright install chromium` (~2 min, 400 MB+ download) at all.
-It installs only the small `playwright` pip wheel (~15 s) and launches the
-system Chrome via `channel="chrome"`. A fallback step still installs
-Playwright's bundled Chromium if system Chrome is ever absent (e.g. macOS
-runners, future image changes).
+- **Default: Playwright-bundled Chromium** — most reliable in live testing:
+  consistent SPA join form and ~5 s join (system Chrome can get a legacy form
+  variant and takes ~45 s to connect).
+- **`actions/cache`** stores `~/.cache/ms-playwright`, so the ~2 min browser
+  download happens once; subsequent runs restore it in seconds.
+- **System Chrome fallback** (`--use-system-chrome`) still works on runners
+  without a cached Playwright browser (e.g. macOS, image changes) by launching
+  the pre-installed Google Chrome via `channel="chrome"`.
 
 ### HTTPS pre-flight (saves ~2 min on dead meetings)
 
