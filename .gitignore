@@ -1,0 +1,8 @@
+# local config — never commit (contains meeting IDs/passcodes)
+meetings.yaml
+
+# runtime output
+evidence/
+__pycache__/
+*.pyc
+.env

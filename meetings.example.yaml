@@ -1,0 +1,42 @@
+# Zoom auto-attendance config. Copy to meetings.yaml and fill in.
+# NOTE: meetings.yaml is gitignored. For GitHub Actions, put the SAME content
+# as a repo secret named ZOOM_MEETINGS_JSON (base64 or plain JSON) so meeting
+# IDs and passcodes never land in the repository.
+#
+# timezone: IANA name used for all start times (default Asia/Hong_Kong)
+# defaults: applied to every meeting unless overridden per-meeting
+#   display_name   name shown to other participants
+#   duration_min   how long to stay connected (auto-leave after this)
+#   join_lead_min  join N minutes before start (default 4)
+#   join_grace_min still join up to N minutes after start (default 2)
+# meetings[]:
+#   name            unique id used by workflow_dispatch (required)
+#   zoom_url        full invite URL, e.g. https://zoom.us/j/1234567890?pwd=abc
+#     OR
+#   meeting_id      numeric meeting id
+#   passcode        meeting passcode (optional if in URL)
+#   start           "HH:MM" = daily recurring; "YYYY-MM-DD HH:MM" = one-off
+#   duration_min    optional per-meeting override
+#   display_name    optional per-meeting override
+#   join_lead_min / join_grace_min  optional per-meeting overrides
+
+timezone: Asia/Hong_Kong
+defaults:
+  display_name: "Meeting Attendee"
+  duration_min: 60
+  join_lead_min: 4
+  join_grace_min: 2
+
+meetings:
+  - name: "Daily Standup"
+    zoom_url: "https://zoom.us/j/1234567890?pwd=REPLACE_ME"
+    start: "09:30"
+    duration_min: 30
+    display_name: "Dr. P"
+
+  # one-off example:
+  # - name: "Grand Rounds 2026-08-20"
+  #   meeting_id: "1234567891"
+  #   passcode: "000000"
+  #   start: "2026-08-20 14:00"
+  #   duration_min: 90

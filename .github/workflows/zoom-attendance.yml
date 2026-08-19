@@ -1,0 +1,105 @@
+name: zoom-attendance
+
+# Attends meetings from the ZOOM_MEETINGS_JSON secret on a schedule.
+# Cron runs every 5 minutes; a cheap stdlib-only check decides whether a
+# meeting is due. Playwright/Chromium are only installed on the ticks that
+# actually join a meeting, so no-op ticks cost ~10s of runner time.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      meeting:
+        description: 'Meeting name from the config (empty = auto-detect due meeting)'
+        required: false
+        default: ''
+      meeting_json:
+        description: 'Full meeting JSON override (for live tests with a fresh URL)'
+        required: false
+        default: ''
+      start_override:
+        description: 'Force join a meeting now with a fake start "YYYY-MM-DD HH:MM" (testing)'
+        required: false
+        default: ''
+      duration:
+        description: 'Override duration in minutes'
+        required: false
+        default: ''
+      display_name:
+        description: 'Override display name'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zoom-attendance
+  cancel-in-progress: false
+
+jobs:
+  attend:
+    runs-on: ubuntu-latest
+    # GitHub-hosted job cap is 360 min; keep a small margin for install time.
+    timeout-minutes: 355
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check due meetings (stdlib only)
+        id: check
+        env:
+          ZOOM_MEETINGS_JSON: ${{ secrets.ZOOM_MEETINGS_JSON }}
+          MEETING: ${{ inputs.meeting }}
+          START_OVERRIDE: ${{ inputs.start_override }}
+          MEETING_JSON: ${{ inputs.meeting_json }}
+        run: |
+          set -e
+          if [ -n "$MEETING_JSON" ]; then
+            echo "$MEETING_JSON" > /tmp/due_meeting.json
+            echo "DUE=1" > /tmp/check_out.txt
+            echo "meeting=$MEETING_JSON" > /tmp/meeting_name.txt
+            echo "due=1" >> "$GITHUB_OUTPUT"
+            echo "meeting=(live test override)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          OUT="$(python3 check_due.py)"
+          echo "$OUT"
+          echo "due=$(echo "$OUT" | grep -c '^DUE=1' || true)" >> "$GITHUB_OUTPUT"
+          echo "meeting=$(echo "$OUT" | sed -n 's/^meeting=//p')" >> "$GITHUB_OUTPUT"
+
+      - name: Install Python deps
+        if: steps.check.outputs.due == '1'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Chromium (Playwright)
+        if: steps.check.outputs.due == '1'
+        run: python -m playwright install --with-deps chromium
+
+      - name: Join meeting
+        if: steps.check.outputs.due == '1'
+        env:
+          MEETING_FILE: /tmp/due_meeting.json
+          DURATION: ${{ inputs.duration }}
+          DISPLAY_NAME: ${{ inputs.display_name }}
+        run: |
+          ARGS=""
+          if [ -n "$DURATION" ]; then ARGS="$ARGS --duration $DURATION"; fi
+          if [ -n "$DISPLAY_NAME" ]; then ARGS="$ARGS --display-name $DISPLAY_NAME"; fi
+          xvfb-run -a python3 join_zoom.py --meeting-file "$MEETING_FILE" $ARGS
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zoom-evidence-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Report no-op tick
+        if: steps.check.outputs.due != '1'
+        run: echo "No meeting due at $(date -u +%H:%M)Z — nothing to do."
